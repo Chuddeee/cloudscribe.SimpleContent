@@ -508,9 +508,7 @@ namespace cloudscribe.SimpleContent.Storage.EFCore.MSSQL.Migrations
                         .IsRequired()
                         .HasMaxLength(255);
 
-                    b.Property<bool>("SuppressTeaser")
-                        .ValueGeneratedOnAdd()
-                        .HasDefaultValue(false);
+                    b.Property<bool>("SuppressTeaser");
 
                     b.Property<string>("TeaserOverride");
 
