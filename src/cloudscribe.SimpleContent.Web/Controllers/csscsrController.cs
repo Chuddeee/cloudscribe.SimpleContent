@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:                  Joe Audette
 // Created:                 2016-05-27
-// Last Modified:           2017-06-14
+// Last Modified:           2018-04-05
 // 
 
 using cloudscribe.Web.Common.Helpers;
@@ -19,32 +19,32 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
     /// csscsr:cloudscribe SimpleContent static resource controller
     /// 
     /// </summary>
-    public class csscsrController : Controller
+    public class CsscsrController : Controller
     {
-        public csscsrController(
+        public CsscsrController(
             IResourceHelper resourceHelper,
-            ILogger<csscsrController> logger)
+            ILogger<CsscsrController> logger)
         {
-            this.resourceHelper = resourceHelper;
-            log = logger;
+            ResourceHelper = resourceHelper;
+            Log = logger;
         }
         
-        private IResourceHelper resourceHelper;
-        private ILogger log;
+        protected IResourceHelper ResourceHelper { get; private set; }
+        protected ILogger Log { get; private set; }
 
 
-        private IActionResult GetResult(string resourceName, string contentType)
+        protected virtual IActionResult GetResult(string resourceName, string contentType)
         {
-            var assembly = typeof(csscsrController).GetTypeInfo().Assembly;
-            resourceName = resourceHelper.ResolveResourceIdentifier(resourceName);
+            var assembly = typeof(CsscsrController).GetTypeInfo().Assembly;
+            resourceName = ResourceHelper.ResolveResourceIdentifier(resourceName);
             var resourceStream = assembly.GetManifestResourceStream(resourceName);
             if (resourceStream == null)
             {
-                log.LogError("resource not found for " + resourceName);
+                Log.LogError("resource not found for " + resourceName);
                 return NotFound();
             }
 
-            log.LogDebug("resource found for " + resourceName);
+            Log.LogDebug("resource found for " + resourceName);
 
             return new FileStreamResult(resourceStream, contentType);
         }
@@ -53,18 +53,18 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         // /csscsr/js/
         [HttpGet]
         [AllowAnonymous]
-        public IActionResult js()
+        public virtual IActionResult Js()
         {
             var baseSegment = "cloudscribe.SimpleContent.Web.js.";
             
             var requestPath = HttpContext.Request.Path.Value;
-            log.LogDebug(requestPath + " requested");
+            Log.LogDebug(requestPath + " requested");
 
             if (requestPath.Length < "/csscsr/js/".Length) return NotFound();
 
             var seg = requestPath.Substring("/csscsr/js/".Length);
             var ext = Path.GetExtension(requestPath);
-            var mimeType = resourceHelper.GetMimeType(ext);
+            var mimeType = ResourceHelper.GetMimeType(ext);
 
             return GetResult(baseSegment + seg, mimeType);
         }
@@ -72,18 +72,18 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         // /csscsr/css/
         [HttpGet]
         [AllowAnonymous]
-        public IActionResult css()
+        public virtual IActionResult Css()
         {
             var baseSegment = "cloudscribe.SimpleContent.Web.css.";
             
             var requestPath = HttpContext.Request.Path.Value;
-            log.LogDebug(requestPath + " requested");
+            Log.LogDebug(requestPath + " requested");
 
             if (requestPath.Length < "/csscsr/css/".Length) return NotFound();
 
             var seg = requestPath.Substring("/csscsr/css/".Length);
             var ext = Path.GetExtension(requestPath);
-            var mimeType = resourceHelper.GetMimeType(ext);
+            var mimeType = ResourceHelper.GetMimeType(ext);
 
             return GetResult(
                 baseSegment + seg,

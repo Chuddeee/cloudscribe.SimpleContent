@@ -2,30 +2,29 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 // Author:                  Joe Audette
 // Created:                 2016-02-09
-// Last Modified:           2018-02-05
+// Last Modified:           2018-04-05
 // 
 
 
 using cloudscribe.SimpleContent.Models;
-using cloudscribe.SimpleContent.Services;
+using cloudscribe.SimpleContent.Web.Config;
+using cloudscribe.SimpleContent.Web.Services;
 using cloudscribe.SimpleContent.Web.ViewModels;
 using cloudscribe.Web.Common;
 using cloudscribe.Web.Common.Extensions;
 using cloudscribe.Web.Navigation;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Diagnostics;
 using System.Collections.Generic;
 using System.Globalization;
-using Microsoft.Extensions.Localization;
-using Microsoft.Extensions.Options;
-using cloudscribe.SimpleContent.Web.Config;
-using cloudscribe.SimpleContent.Web.Services;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 {
@@ -47,40 +46,39 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             
             )
         {
-            this.projectService = projectService;
-            this.blogService = blogService;
-            this.contentProcessor = contentProcessor;
-            this.blogRoutes = blogRoutes;
-            this.authorNameResolver = authorNameResolver;
-            this.emailService = emailService;
-            this.authorizationService = authorizationService;
-            this.timeZoneHelper = timeZoneHelper;
-            
-            sr = localizer;
-            log = logger;
-            config = configOptionsAccessor.Value;
+            ProjectService = projectService;
+            BlogService = blogService;
+            ContentProcessor = contentProcessor;
+            BlogRoutes = blogRoutes;
+            AuthorNameResolver = authorNameResolver;
+            EmailService = emailService;
+            AuthorizationService = authorizationService;
+            TimeZoneHelper = timeZoneHelper;
+            StringLocalizer = localizer;
+            Log = logger;
+            ContentOptions = configOptionsAccessor.Value;
         }
 
-        private IProjectService projectService;
-        private IBlogService blogService;
-        private IBlogRoutes blogRoutes;
-        private IAuthorNameResolver authorNameResolver;
-        private IProjectEmailService emailService;
-        private IContentProcessor contentProcessor;
-        private ILogger log;
-        private ITimeZoneHelper timeZoneHelper;
-        private IAuthorizationService authorizationService;
-        private IStringLocalizer<SimpleContent> sr;
-        private SimpleContentConfig config;
-        
+        protected IProjectService ProjectService { get; private set; }
+        protected IBlogService BlogService { get; private set; }
+        protected IBlogRoutes BlogRoutes { get; private set; }
+        protected IAuthorNameResolver AuthorNameResolver { get; private set; }
+        protected IProjectEmailService EmailService { get; private set; }
+        protected IContentProcessor ContentProcessor { get; private set; }
+        protected ILogger Log { get; private set; }
+        protected ITimeZoneHelper TimeZoneHelper { get; private set; }
+        protected IAuthorizationService AuthorizationService { get; private set; }
+        protected IStringLocalizer<SimpleContent> StringLocalizer { get; private set; }
+        protected SimpleContentConfig ContentOptions { get; private set; }
+
 
         [HttpGet]
         [Authorize(Policy = "BlogViewPolicy")]
-        public async Task<IActionResult> Index(
+        public virtual async Task<IActionResult> Index(
             string category = "",
             int page = 1)
         {
-            var projectSettings = await projectService.GetCurrentProjectSettings();
+            var projectSettings = await ProjectService.GetCurrentProjectSettings();
 
             if (projectSettings == null)
             {
@@ -88,33 +86,35 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 return new EmptyResult();
             }
 
-            var model = new BlogViewModel(contentProcessor);
-            model.ProjectSettings = projectSettings;
-            // check if the user has the BlogEditor claim or meets policy
-            model.CanEdit = await User.CanEditBlog(projectSettings.Id, authorizationService);
-            model.ProjectSettings = projectSettings;
-            model.BlogRoutes = blogRoutes;
-            model.CurrentCategory = category;
+            var model = new BlogViewModel(ContentProcessor)
+            {
+                ProjectSettings = projectSettings,
+                // check if the user has the BlogEditor claim or meets policy
+                CanEdit = await User.CanEditBlog(projectSettings.Id, AuthorizationService),
+                BlogRoutes = BlogRoutes,
+                CurrentCategory = category
+            };
+            
             if(!string.IsNullOrEmpty(model.CurrentCategory))
             {
-                model.ListRouteName = blogRoutes.BlogCategoryRouteName;
+                model.ListRouteName = BlogRoutes.BlogCategoryRouteName;
             }
             else
             {
-                model.ListRouteName = blogRoutes.BlogIndexRouteName;
+                model.ListRouteName = BlogRoutes.BlogIndexRouteName;
             }
 
             ViewData["Title"] = model.ProjectSettings.Title;
-            var result = await blogService.GetPosts(category, page, model.CanEdit);
+            var result = await BlogService.GetPosts(category, page, model.CanEdit);
             model.Posts = result.Data;
-            model.Categories = await blogService.GetCategories(model.CanEdit);
-            model.Archives = await blogService.GetArchives(model.CanEdit);
+            model.Categories = await BlogService.GetCategories(model.CanEdit);
+            model.Archives = await BlogService.GetArchives(model.CanEdit);
             model.Paging.ItemsPerPage = model.ProjectSettings.PostsPerPage;
             model.Paging.CurrentPage = page;
             model.Paging.TotalItems = result.TotalItems; 
-            model.TimeZoneHelper = timeZoneHelper;
+            model.TimeZoneHelper = TimeZoneHelper;
             model.TimeZoneId = model.ProjectSettings.TimeZoneId;
-            model.NewItemPath = Url.RouteUrl(blogRoutes.PostEditRouteName, new { slug = "" });
+            model.NewItemPath = Url.RouteUrl(BlogRoutes.PostEditRouteName, new { slug = "" });
 
             return View("Index", model);
         }
@@ -122,9 +122,9 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
        
         [HttpGet]
         [Authorize(Policy = "BlogViewPolicy")]
-        public async Task<IActionResult> MostRecent()
+        public virtual async Task<IActionResult> MostRecent()
         {
-            var projectSettings = await projectService.GetCurrentProjectSettings();
+            var projectSettings = await ProjectService.GetCurrentProjectSettings();
 
 
             if (projectSettings == null)
@@ -132,38 +132,40 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 return RedirectToAction("Index");
             }
 
-            var result = await blogService.GetRecentPosts(1);
+            var result = await BlogService.GetRecentPosts(1);
             if ((result != null) && (result.Count > 0))
             {
                 var post = result[0];
-                var url = await blogService.ResolvePostUrl(post);
+                var url = await BlogService.ResolvePostUrl(post);
                 return Redirect(url);
 
             }
 
-            return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+            return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
         }
 
 
 
         [HttpGet]
         [Authorize(Policy = "BlogViewPolicy")]
-        public async Task<IActionResult> Archive(
+        public virtual async Task<IActionResult> Archive(
             int year,
             int month = 0,
             int day = 0,
             int page = 1)
         {
 
-            var model = new BlogViewModel(contentProcessor);
-            model.ProjectSettings = await projectService.GetCurrentProjectSettings();
-            model.BlogRoutes = blogRoutes;
-            model.CanEdit = await User.CanEditBlog(model.ProjectSettings.Id, authorizationService);
-            model.NewItemPath = Url.RouteUrl(blogRoutes.PostEditRouteName, new { slug = "" });
+            var model = new BlogViewModel(ContentProcessor)
+            {
+                ProjectSettings = await ProjectService.GetCurrentProjectSettings(),
+                BlogRoutes = BlogRoutes
+            };
+            model.CanEdit = await User.CanEditBlog(model.ProjectSettings.Id, AuthorizationService);
+            model.NewItemPath = Url.RouteUrl(BlogRoutes.PostEditRouteName, new { slug = "" });
 
             ViewData["Title"] = model.ProjectSettings.Title;
 
-            var result = await blogService.GetPosts(
+            var result = await BlogService.GetPosts(
                 model.ProjectSettings.Id,
                 year,
                 month,
@@ -174,13 +176,13 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 );
 
             model.Posts = result.Data;
-            model.Categories = await blogService.GetCategories(model.CanEdit);
-            model.Archives = await blogService.GetArchives(model.CanEdit);
+            model.Categories = await BlogService.GetCategories(model.CanEdit);
+            model.Archives = await BlogService.GetArchives(model.CanEdit);
             model.Paging.ItemsPerPage = model.ProjectSettings.PostsPerPage;
             model.Paging.CurrentPage = page;
             model.Paging.TotalItems = result.TotalItems;
             
-            model.TimeZoneHelper = timeZoneHelper;
+            model.TimeZoneHelper = TimeZoneHelper;
             model.TimeZoneId = model.ProjectSettings.TimeZoneId;
             model.Year = year;
             model.Month = month;
@@ -191,7 +193,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
         [HttpGet]
         [Authorize(Policy = "BlogViewPolicy")]
-        public async Task<IActionResult> Category(
+        public virtual async Task<IActionResult> Category(
             string category = "",
             int page = 1)
         {
@@ -207,7 +209,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpGet]
         [Authorize(Policy = "BlogViewPolicy")]
         [ActionName("PostNoDate")]
-        public async Task<IActionResult> Post(string slug)
+        public virtual async Task<IActionResult> Post(string slug)
         {
             return await Post(0, 0, 0, slug);
         }
@@ -215,13 +217,13 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpGet]
         [Authorize(Policy = "BlogViewPolicy")]
         [ActionName("PostWithDate")]
-        public async Task<IActionResult> Post(int year , int month, int day, string slug)
+        public virtual async Task<IActionResult> Post(int year , int month, int day, string slug)
         {
-            var projectSettings = await projectService.GetCurrentProjectSettings();
+            var projectSettings = await ProjectService.GetCurrentProjectSettings();
 
             if (projectSettings == null)
             {
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
             if(!projectSettings.IncludePubDateInPostUrls)
@@ -229,26 +231,28 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 if(year > 0)
                 {
                     //TODO: an option for permanent redirect
-                    return RedirectToRoute(blogRoutes.PostWithoutDateRouteName, new { slug = slug });
+                    return RedirectToRoute(BlogRoutes.PostWithoutDateRouteName, new { slug });
                 }
             }
 
-            var canEdit = await User.CanEditBlog(projectSettings.Id, authorizationService);
+            var canEdit = await User.CanEditBlog(projectSettings.Id, AuthorizationService);
             
             //var isNew = false;
             PostResult result = null;
             if(!string.IsNullOrEmpty(slug))
             {
-                result = await blogService.GetPostBySlug(slug);
+                result = await BlogService.GetPostBySlug(slug);
             }
-            
-            var model = new BlogViewModel(contentProcessor);
-            model.CanEdit = canEdit;
+
+            var model = new BlogViewModel(ContentProcessor)
+            {
+                CanEdit = canEdit
+            };
 
             if ((result == null)||(result.Post == null))
             {
-                log.LogWarning("post not found for slug " + slug + ", so redirecting to index");
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                Log.LogWarning("post not found for slug " + slug + ", so redirecting to index");
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
             else
             {
@@ -257,7 +261,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                     if(year == 0)
                     {
                         //TODO: option whether to use permanent redirect
-                        return RedirectToRoute(blogRoutes.PostWithDateRouteName, 
+                        return RedirectToRoute(BlogRoutes.PostWithDateRouteName, 
                             new {
                                 year = result.Post.PubDate.Year,
                                 month = result.Post.PubDate.Month.ToString("00"),
@@ -274,37 +278,37 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             model.CurrentPost = result.Post;
             if(result.PreviousPost != null)
             {
-                model.PreviousPostUrl = await blogService.ResolvePostUrl(result.PreviousPost);
+                model.PreviousPostUrl = await BlogService.ResolvePostUrl(result.PreviousPost);
             }
             if (result.NextPost != null)
             {
-                model.NextPostUrl = await blogService.ResolvePostUrl(result.NextPost);
+                model.NextPostUrl = await BlogService.ResolvePostUrl(result.NextPost);
             }
 
             
 
-            var currentUrl = await blogService.ResolvePostUrl(result.Post);
+            var currentUrl = await BlogService.ResolvePostUrl(result.Post);
             var breadCrumbHelper = new TailCrumbUtility(HttpContext);
             breadCrumbHelper.AddTailCrumb(result.Post.Id, result.Post.Title, currentUrl);
 
-            model.NewItemPath = Url.RouteUrl(blogRoutes.PostEditRouteName, new { slug = "" });
-            model.EditPath = Url.RouteUrl(blogRoutes.PostEditRouteName, new { slug = result.Post.Slug });
+            model.NewItemPath = Url.RouteUrl(BlogRoutes.PostEditRouteName, new { slug = "" });
+            model.EditPath = Url.RouteUrl(BlogRoutes.PostEditRouteName, new { slug = result.Post.Slug });
 
             model.ProjectSettings = projectSettings;
-            model.BlogRoutes = blogRoutes;
-            model.Categories = await blogService.GetCategories(model.CanEdit);
-            model.Archives = await blogService.GetArchives(model.CanEdit);
+            model.BlogRoutes = BlogRoutes;
+            model.Categories = await BlogService.GetCategories(model.CanEdit);
+            model.Archives = await BlogService.GetArchives(model.CanEdit);
             model.ShowComments = true; //mode.Length == 0; // do we need this for a global disable
-            model.CommentsAreOpen = await blogService.CommentsAreOpen(result.Post, canEdit);
+            model.CommentsAreOpen = await BlogService.CommentsAreOpen(result.Post, canEdit);
             //model.ApprovedCommentCount = post.Comments.Where(c => c.IsApproved == true).Count();
-            model.TimeZoneHelper = timeZoneHelper;
+            model.TimeZoneHelper = TimeZoneHelper;
             model.TimeZoneId = model.ProjectSettings.TimeZoneId;
 
             if (!canEdit)
             {           
                 if((!model.CurrentPost.IsPublished) || model.CurrentPost.PubDate > DateTime.UtcNow)
                 {
-                    return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                    return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
                 }
             }
 
@@ -315,43 +319,45 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
         [HttpGet]
         [AllowAnonymous]
-        public async Task<IActionResult> Edit(string slug = "", string type="")
+        public virtual async Task<IActionResult> Edit(string slug = "", string type="")
         {
-            var projectSettings = await projectService.GetCurrentProjectSettings();
+            var projectSettings = await ProjectService.GetCurrentProjectSettings();
 
             if (projectSettings == null)
             {
-                log.LogInformation("redirecting to index because project settings not found");
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                Log.LogInformation("redirecting to index because project settings not found");
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
-            var canEdit = await User.CanEditPages(projectSettings.Id, authorizationService);
+            var canEdit = await User.CanEditPages(projectSettings.Id, AuthorizationService);
             if (!canEdit)
             {
-                log.LogInformation("redirecting to index because user cannot edit");
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                Log.LogInformation("redirecting to index because user cannot edit");
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
             if (slug == "none") { slug = string.Empty; }
 
-            var model = new PostEditViewModel();
-            model.ProjectId = projectSettings.Id;
-            model.TeasersEnabled = projectSettings.TeaserMode != TeaserMode.Off;
-            
+            var model = new PostEditViewModel
+            {
+                ProjectId = projectSettings.Id,
+                TeasersEnabled = projectSettings.TeaserMode != TeaserMode.Off
+            };
+
             PostResult postResult = null;
             if (!string.IsNullOrEmpty(slug))
             {
-                postResult = await blogService.GetPostBySlug(slug);
+                postResult = await BlogService.GetPostBySlug(slug);
             }
             if (postResult== null || postResult.Post == null)
             {
-                ViewData["Title"] = sr["New Post"];
-                model.Author = await authorNameResolver.GetAuthorName(User);
+                ViewData["Title"] = StringLocalizer["New Post"];
+                model.Author = await AuthorNameResolver.GetAuthorName(User);
                 model.IsPublished = true;
-                model.PubDate = timeZoneHelper.ConvertToLocalTime(DateTime.UtcNow, projectSettings.TimeZoneId).ToString();
-                model.CurrentPostUrl = Url.RouteUrl(blogRoutes.BlogIndexRouteName);
+                model.PubDate = TimeZoneHelper.ConvertToLocalTime(DateTime.UtcNow, projectSettings.TimeZoneId).ToString();
+                model.CurrentPostUrl = Url.RouteUrl(BlogRoutes.BlogIndexRouteName);
                 model.ContentType = projectSettings.DefaultContentType;
-                if(config.AllowMarkdown && !string.IsNullOrWhiteSpace(type) && type == "markdown")
+                if(ContentOptions.AllowMarkdown && !string.IsNullOrWhiteSpace(type) && type == "markdown")
                 {
                     model.ContentType = "markdown";  
                 }
@@ -362,18 +368,18 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             }
             else
             {
-                ViewData["Title"] = string.Format(CultureInfo.CurrentUICulture, sr["Edit - {0}"], postResult.Post.Title);
+                ViewData["Title"] = string.Format(CultureInfo.CurrentUICulture, StringLocalizer["Edit - {0}"], postResult.Post.Title);
                 model.Author = postResult.Post.Author;
                 model.Content = postResult.Post.Content;
                 model.Id = postResult.Post.Id;
                 model.CorrelationKey = postResult.Post.CorrelationKey;
                 model.IsPublished = postResult.Post.IsPublished;
                 model.MetaDescription = postResult.Post.MetaDescription;
-                model.PubDate = timeZoneHelper.ConvertToLocalTime(postResult.Post.PubDate, projectSettings.TimeZoneId).ToString();
+                model.PubDate = TimeZoneHelper.ConvertToLocalTime(postResult.Post.PubDate, projectSettings.TimeZoneId).ToString();
                 model.Slug = postResult.Post.Slug;
                 model.Title = postResult.Post.Title;
-                model.CurrentPostUrl = await blogService.ResolvePostUrl(postResult.Post).ConfigureAwait(false);
-                model.DeletePostRouteName = blogRoutes.PostDeleteRouteName;
+                model.CurrentPostUrl = await BlogService.ResolvePostUrl(postResult.Post).ConfigureAwait(false);
+                model.DeletePostRouteName = BlogRoutes.PostDeleteRouteName;
                 model.Categories = string.Join(",", postResult.Post.Categories);
                 model.ImageUrl = postResult.Post.ImageUrl;
                 model.ThumbnailUrl = postResult.Post.ThumbnailUrl;
@@ -390,34 +396,34 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(PostEditViewModel model)
+        public virtual async Task<IActionResult> Edit(PostEditViewModel model)
         {
-            var project = await projectService.GetCurrentProjectSettings();
+            var project = await ProjectService.GetCurrentProjectSettings();
 
             if (project == null)
             {
-                log.LogInformation("redirecting to index because project settings not found");
+                Log.LogInformation("redirecting to index because project settings not found");
 
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
-            var canEdit = await User.CanEditPages(project.Id, authorizationService);
+            var canEdit = await User.CanEditPages(project.Id, AuthorizationService);
 
             if (!canEdit)
             {
-                log.LogInformation("redirecting to index because user is not allowed to edit");
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                Log.LogInformation("redirecting to index because user is not allowed to edit");
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
             if (!ModelState.IsValid)
             {
                 if (string.IsNullOrEmpty(model.Id))
                 {
-                    ViewData["Title"] = sr["New Post"];
+                    ViewData["Title"] = StringLocalizer["New Post"];
                 }
                 else
                 {
-                    ViewData["Title"] = string.Format(CultureInfo.CurrentUICulture, sr["Edit - {0}"], model.Title);
+                    ViewData["Title"] = string.Format(CultureInfo.CurrentUICulture, StringLocalizer["Edit - {0}"], model.Title);
                 }
                 model.ProjectId = project.Id;
                 model.TeasersEnabled = project.TeaserMode != TeaserMode.Off;
@@ -429,7 +435,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             if (!string.IsNullOrEmpty(model.Categories))
             {
-                if(config.ForceLowerCaseCategories)
+                if(ContentOptions.ForceLowerCaseCategories)
                 {
                     categories = model.Categories.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim().ToLower())
                     .Where(x =>
@@ -451,14 +457,12 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 }
                 
             }
-
-
+            
             IPost post = null;
             if (!string.IsNullOrEmpty(model.Id))
             {
-                post = await blogService.GetPost(model.Id);
+                post = await BlogService.GetPost(model.Id);
             }
-
             
             var isNew = false;
             bool slugAvailable;
@@ -473,7 +477,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 {
                     // remove any bad chars
                     model.Slug = ContentUtils.CreateSlug(model.Slug);
-                    slugAvailable = await blogService.SlugIsAvailable(project.Id, model.Slug);
+                    slugAvailable = await BlogService.SlugIsAvailable(project.Id, model.Slug);
                     if(slugAvailable)
                     {
                         post.Slug = model.Slug;
@@ -481,7 +485,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                     else
                     {
                         //log.LogWarning($"slug {model.Slug} was requested but not changed because it is already in use");
-                        this.AlertDanger(sr["The post slug was not changed because the requested slug is already in use."], true);
+                        this.AlertDanger(StringLocalizer["The post slug was not changed because the requested slug is already in use."], true);
                     }
                 }
             }
@@ -493,7 +497,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                     // remove any bad chars
                     model.Slug = ContentUtils.CreateSlug(model.Slug);
                     slug = model.Slug;
-                    slugAvailable = await blogService.SlugIsAvailable(project.Id, slug);
+                    slugAvailable = await BlogService.SlugIsAvailable(project.Id, slug);
                     if(!slugAvailable)
                     {
                         slug = ContentUtils.CreateSlug(model.Title);
@@ -504,11 +508,11 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                     slug = ContentUtils.CreateSlug(model.Title);
                 }
                 
-                slugAvailable = await blogService.SlugIsAvailable(project.Id, slug);
+                slugAvailable = await BlogService.SlugIsAvailable(project.Id, slug);
                 if (!slugAvailable)
                 {
                     //log.LogInformation("returning 409 because slug already in use");
-                    ModelState.AddModelError("postediterror", sr["slug is already in use."]);
+                    ModelState.AddModelError("postediterror", StringLocalizer["slug is already in use."]);
 
                     return View(model);
                 }
@@ -516,7 +520,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 post = new Post()
                 {
                     BlogId = project.Id,
-                    Author = await authorNameResolver.GetAuthorName(User),
+                    Author = await AuthorNameResolver.GetAuthorName(User),
                     Title = model.Title,
                     MetaDescription = model.MetaDescription,
                     Content = model.Content,
@@ -542,22 +546,22 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             if (!string.IsNullOrEmpty(model.PubDate))
             {
                 var localTime = DateTime.Parse(model.PubDate);
-                post.PubDate = timeZoneHelper.ConvertToUtc(localTime, project.TimeZoneId);
+                post.PubDate = TimeZoneHelper.ConvertToUtc(localTime, project.TimeZoneId);
 
             }
 
             if (isNew)
             {
-                await blogService.Create(post);
+                await BlogService.Create(post);
             }
             else
             {
-                await blogService.Update(post);
+                await BlogService.Update(post);
             }
 
             if (project.IncludePubDateInPostUrls)
             {
-                return RedirectToRoute(blogRoutes.PostWithDateRouteName,
+                return RedirectToRoute(BlogRoutes.PostWithDateRouteName,
                     new
                     {
                         year = post.PubDate.Year,
@@ -568,7 +572,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             }
             else
             {
-                return RedirectToRoute(blogRoutes.PostWithoutDateRouteName,
+                return RedirectToRoute(BlogRoutes.PostWithoutDateRouteName,
                     new { slug = post.Slug });  
             }
 
@@ -577,44 +581,44 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Delete(string id)
+        public virtual async Task<IActionResult> Delete(string id)
         {
-            var project = await projectService.GetCurrentProjectSettings();
+            var project = await ProjectService.GetCurrentProjectSettings();
 
             if (project == null)
             {
-                log.LogInformation("project settings not found, redirecting");
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                Log.LogInformation("project settings not found, redirecting");
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
-            bool canEdit = await User.CanEditBlog(project.Id, authorizationService);
+            bool canEdit = await User.CanEditBlog(project.Id, AuthorizationService);
 
             if (!canEdit)
             {
-                log.LogInformation("user is not allowed to edit, redicrecting");
+                Log.LogInformation("user is not allowed to edit, redicrecting");
 
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
             if (string.IsNullOrEmpty(id))
             {
-                log.LogInformation("postid not provided, redirecting");
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                Log.LogInformation("postid not provided, redirecting");
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
 
-            var post = await blogService.GetPost(id);
+            var post = await BlogService.GetPost(id);
 
             if (post == null)
             {
-                log.LogInformation("post not found, redirecting");
+                Log.LogInformation("post not found, redirecting");
 
-                return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+                return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
             }
-            log.LogWarning("user " + User.Identity.Name + " deleted post " + post.Slug);
+            Log.LogWarning("user " + User.Identity.Name + " deleted post " + post.Slug);
 
-            await blogService.Delete(post.Id);
+            await BlogService.Delete(post.Id);
             
-            return RedirectToRoute(blogRoutes.BlogIndexRouteName);
+            return RedirectToRoute(BlogRoutes.BlogIndexRouteName);
 
         }
 
@@ -623,7 +627,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpPost]
         [Authorize(Policy = "BlogViewPolicy")]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AjaxPostComment(CommentViewModel model)
+        public virtual async Task<IActionResult> AjaxPostComment(CommentViewModel model)
         {
             // disable status code page for ajax requests
             var statusCodePagesFeature = HttpContext.Features.Get<IStatusCodePagesFeature>();
@@ -638,26 +642,26 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             {  
                 Response.StatusCode = 403;
                 //await Response.WriteAsync("Please enter a valid e-mail address");
-                return Content(sr["Please enter a valid e-mail address"]);
+                return Content(StringLocalizer["Please enter a valid e-mail address"]);
             }
             
-            var project = await projectService.GetCurrentProjectSettings();
+            var project = await ProjectService.GetCurrentProjectSettings();
 
             if (project == null)
             {
-                log.LogDebug("returning 500 blog not found");
+                Log.LogDebug("returning 500 blog not found");
                 return StatusCode(500);
             }
 
             if (string.IsNullOrEmpty(model.PostId))
             {
-                log.LogDebug("returning 500 because no postid was posted");
+                Log.LogDebug("returning 500 because no postid was posted");
                 return StatusCode(500);
             }
 
             if (string.IsNullOrEmpty(model.Name))
             {
-                log.LogDebug("returning 403 because no name was posted");
+                Log.LogDebug("returning 403 because no name was posted");
                 Response.StatusCode = 403;
                 //await Response.WriteAsync("Please enter a valid name");
                 return Content("Please enter a valid name");
@@ -665,17 +669,17 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             if (string.IsNullOrEmpty(model.Content))
             {
-                log.LogDebug("returning 403 because no content was posted");
+                Log.LogDebug("returning 403 because no content was posted");
                 Response.StatusCode = 403;
                 //await Response.WriteAsync("Please enter a valid content");
                 return Content("Please enter a valid content");
             }
 
-            var blogPost = await blogService.GetPost(model.PostId);
+            var blogPost = await BlogService.GetPost(model.PostId);
 
             if (blogPost == null)
             {
-                log.LogDebug("returning 500 blog post not found");
+                Log.LogDebug("returning 500 blog post not found");
                 return StatusCode(500);
             }
 
@@ -686,7 +690,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                     var captchaResponse = await this.ValidateRecaptcha(Request, project.RecaptchaPrivateKey);
                     if (!captchaResponse.Success)
                     {
-                        log.LogDebug("returning 403 captcha validation failed");
+                        Log.LogDebug("returning 403 captcha validation failed");
                         Response.StatusCode = 403;
                         //await Response.WriteAsync("captcha validation failed");
                         return Content("captcha validation failed");
@@ -696,7 +700,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             var userAgent = HttpContext.Request.Headers["User-Agent"].ToString();
 
-            var canEdit = await User.CanEditBlog(project.Id, authorizationService);
+            var canEdit = await User.CanEditBlog(project.Id, AuthorizationService);
             
             var isApproved = canEdit;
             if (!isApproved) isApproved = !project.ModerateComments;
@@ -718,7 +722,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
             };
             
             blogPost.Comments.Add(comment);
-            await blogService.Update(blogPost);
+            await BlogService.Update(blogPost);
 
             // TODO: clear cache
 
@@ -727,14 +731,14 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
        
             if(shouldSendEmail)
             {
-                var postUrl = await blogService.ResolvePostUrl(blogPost);
+                var postUrl = await BlogService.ResolvePostUrl(blogPost);
                 var baseUrl = string.Concat(HttpContext.Request.Scheme,
                         "://",
                         HttpContext.Request.Host.ToUriComponent());
 
                 postUrl = baseUrl + postUrl;
 
-                emailService.SendCommentNotificationEmailAsync(
+                EmailService.SendCommentNotificationEmailAsync(
                     project,
                     blogPost,
                     comment,
@@ -743,17 +747,18 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                     postUrl
                     ).Forget(); //async but don't want to wait
             }
-            
-            var viewModel = new BlogViewModel(contentProcessor);
-            viewModel.ProjectSettings = project;
-            viewModel.BlogRoutes = blogRoutes;
-            viewModel.CurrentPost = blogPost;
-            viewModel.TmpComment = comment;
-            viewModel.TimeZoneHelper = timeZoneHelper;
-            viewModel.TimeZoneId = viewModel.ProjectSettings.TimeZoneId;
 
+            var viewModel = new BlogViewModel(ContentProcessor)
+            {
+                ProjectSettings = project,
+                BlogRoutes = BlogRoutes,
+                CurrentPost = blogPost,
+                TmpComment = comment,
+                TimeZoneHelper = TimeZoneHelper,
+                TimeZoneId = project.TimeZoneId,
+                CanEdit = canEdit
+            };
             
-            viewModel.CanEdit = canEdit;
 
             return PartialView("CommentPartial", viewModel);
             
@@ -762,7 +767,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AjaxApproveComment(string postId, string commentId)
+        public virtual async Task<IActionResult> AjaxApproveComment(string postId, string commentId)
         {
             // disable status code page for ajax requests
             var statusCodePagesFeature = HttpContext.Features.Get<IStatusCodePagesFeature>();
@@ -773,41 +778,41 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             if (string.IsNullOrEmpty(postId))
             {
-                log.LogDebug("returning 404 because no postid was posted");
+                Log.LogDebug("returning 404 because no postid was posted");
                
                 return StatusCode(404);
             }
 
             if (string.IsNullOrEmpty(commentId))
             {
-                log.LogDebug("returning 404 because no commentid was posted");
+                Log.LogDebug("returning 404 because no commentid was posted");
                 //Response.StatusCode = 404;
                 // await Response.WriteAsync("Comm");
                 return StatusCode(404);
             }
 
-            var project = await projectService.GetCurrentProjectSettings();
+            var project = await ProjectService.GetCurrentProjectSettings();
 
             if (project == null)
             {
-                log.LogDebug("returning 500 blog not found");
+                Log.LogDebug("returning 500 blog not found");
                 //Response.StatusCode = 500;
                 return StatusCode(500);
             }
 
-            bool canEdit = await User.CanEditBlog(project.Id, authorizationService);
+            bool canEdit = await User.CanEditBlog(project.Id, AuthorizationService);
             
             if (!canEdit)
             {
-                log.LogInformation("returning 403 user is not allowed to edit");
+                Log.LogInformation("returning 403 user is not allowed to edit");
                 return StatusCode(403);
             }
 
-            var blogPost = await blogService.GetPost(postId);
+            var blogPost = await BlogService.GetPost(postId);
 
             if (blogPost == null)
             {
-                log.LogDebug("returning 404 blog post not found");
+                Log.LogDebug("returning 404 blog post not found");
                 return StatusCode(404);
             }
 
@@ -815,12 +820,12 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             if (comment == null)
             {
-                log.LogDebug("returning 404 comment not found");
+                Log.LogDebug("returning 404 comment not found");
                 return StatusCode(404);
             }
 
             comment.IsApproved = true;
-            await blogService.Update(blogPost);
+            await BlogService.Update(blogPost);
 
             return StatusCode(200);
 
@@ -829,7 +834,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AjaxDeleteComment(string postId, string commentId)
+        public virtual async Task<IActionResult> AjaxDeleteComment(string postId, string commentId)
         {
             // disable status code page for ajax requests
             var statusCodePagesFeature = HttpContext.Features.Get<IStatusCodePagesFeature>();
@@ -840,37 +845,37 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             if (string.IsNullOrEmpty(postId))
             {
-                log.LogDebug("returning 404 because no postid was posted");
+                Log.LogDebug("returning 404 because no postid was posted");
                 return StatusCode(404);
             }
 
             if (string.IsNullOrEmpty(commentId))
             {
-                log.LogDebug("returning 404 because no commentid was posted");
+                Log.LogDebug("returning 404 because no commentid was posted");
                 return StatusCode(404);
             }
 
-            var project = await projectService.GetCurrentProjectSettings();
+            var project = await ProjectService.GetCurrentProjectSettings();
 
             if (project == null)
             {
-                log.LogDebug("returning 404 blog not found");
+                Log.LogDebug("returning 404 blog not found");
                 return StatusCode(404);
             }
 
-            bool canEdit = await User.CanEditBlog(project.Id, authorizationService);
+            bool canEdit = await User.CanEditBlog(project.Id, AuthorizationService);
             
             if (!canEdit)
             {
-                log.LogInformation("returning 403 user is not allowed to edit");
+                Log.LogInformation("returning 403 user is not allowed to edit");
                 return StatusCode(403);
             }
 
-            var blogPost = await blogService.GetPost(postId);
+            var blogPost = await BlogService.GetPost(postId);
 
             if (blogPost == null)
             {
-                log.LogDebug("returning 404 blog post not found");
+                Log.LogDebug("returning 404 blog post not found");
                 return StatusCode(404);
             }
 
@@ -878,7 +883,7 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
 
             if (comment == null)
             {
-                log.LogDebug("returning 404 comment not found");
+                Log.LogDebug("returning 404 comment not found");
                 return StatusCode(404);
             }
 
@@ -893,20 +898,19 @@ namespace cloudscribe.SimpleContent.Web.Mvc.Controllers
                 }
             }
             blogPost.Comments = copyOfComments;
-            await blogService.Update(blogPost);
+            await BlogService.Update(blogPost);
 
             return StatusCode(200);
         }
 
-        private string GetUrl(string website)
+        protected string GetUrl(string website)
         {
             if(string.IsNullOrEmpty(website)) { return string.Empty; }
 
             if (!website.Contains("://"))
                 website = "http://" + website;
 
-            Uri url;
-            if (Uri.TryCreate(website, UriKind.Absolute, out url))
+            if (Uri.TryCreate(website, UriKind.Absolute, out Uri url))
                 return url.ToString();
 
             return string.Empty;
